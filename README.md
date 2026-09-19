@@ -11,10 +11,10 @@ A QGIS Processing script that bulk-downloads orthophoto (aerial imagery) tiles f
 Given an area of interest anywhere in Austria, this tool:
 
 - Fetches **Orthofoto RGBI** (true colour + near-infrared, 20cm resolution) by default — this product isn't published on a fixed grid but in irregular flight "Operate", found via a full-text catalog search and a local overlap check against your area. RGB and infrared arrive as separate files; the infrared channel can be switched off, or combined with RGB into a single 4-band stack.
-- Optionally, under "Advanced Parameters", also fetches **Orthofoto RGB** (true colour only, 20cm) from BEV's fixed 50×50 km nationwide grid — no infrared, but a single consistent capture date per tile. Loaded as an additional, separate layer alongside RGBI, not instead of it.
+- Optionally, under "Advanced Parameters", also fetches **Orthofoto RGB** (true colour only, 20cm) from BEV's fixed 50×50 km nationwide grid — no infrared, but a single consistent capture date per tile. Loaded as an additional, separate layer alongside RGBI, not instead of it. This can be used as a backup method for RGB orthophoto download.
 - Reads only the actual bytes it needs via HTTP range requests directly from BEV's Cloud-Optimized GeoTIFFs (`/vsicurl/`), instead of downloading the full file — relevant since a single tile or flight can be several GB. Falls back to downloading (and locally caching) the complete file only if the windowed read fails for some reason.
 - Warns before starting if the chosen area is very large, given how quickly data volume grows at 20cm resolution.
-- Builds a lightweight VRT mosaic per product (no pixel duplication on disk) and adds it directly to your QGIS project — including the 4-band stack and an optional target-CRS reprojection, both of which are also delivered as a VRT rather than a materialized copy.
+- Builds a lightweight VRT mosaic per product and adds it directly to your QGIS project — including the 4-band stack and an optional target-CRS reprojection, both of which are also delivered as a VRT rather than a materialized copy.
 - Optional pyramids (overviews) for faster display in QGIS.
 - Optional on-the-fly reprojection, under "Advanced Parameters", to a target CRS of your choice, via a standard CRS picker — can noticeably increase processing time, since this virtually reprojects rather than copying pixels.
 - Cancellable mid-run; failed tiles/Operate are reported in the log rather than silently skipped.
