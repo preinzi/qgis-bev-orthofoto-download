@@ -160,11 +160,26 @@ def year_suffix(years):
 # Warnschwelle, ab der VOR dem eigentlichen Download gewarnt wird.
 WARN_AREA_KM2 = 300
 
+# Harte Obergrenze, ab der der Lauf SOFORT abgebrochen wird statt nur zu
+# warnen. Grosszuegig ueber der Flaeche ganz Oesterreichs (~83.900 km²)
+# gewaehlt, damit eine tatsaechlich beabsichtigte landesweite Anfrage nicht
+# blockiert wird - aber weit unter einer versehentlich kontinent-grossen AOI
+# (z.B. durch eine falsch interpretierte Koordinatenreihenfolge im
+# Extent-Parameter, siehe candidate_plausible() weiter unten), die sonst zu
+# massenhaften Fehltreffern und in der Folge zu Abstuerzen mangels
+# Speicherplatz fuehrt.
+ABORT_AREA_KM2 = 200_000
+
 # Grober, aber grosszuegiger Gueltigkeitsbereich fuer Oesterreich in
 # EPSG:3035 - erkennt eine fehlgeschlagene/nicht durchgefuehrte
 # CRS-Umrechnung, die sonst still falsche (unveraenderte) Koordinaten
 # durchreichen wuerde.
 AUSTRIA_3035_SANITY_BOUNDS = (4_000_000, 2_400_000, 5_200_000, 3_000_000)
+
+
+def bbox_area_km2(bbox):
+    x0, y0, x1, y1 = bbox
+    return abs((x1 - x0) * (y1 - y0)) / 1e6
 
 
 def unique_path(path):
@@ -946,14 +961,59 @@ class BevOrthofotoBulkDownload(QgsProcessingAlgorithm):
             r"\s*(?:\[\s*([^\]]+?)\s*\])?\s*$",
             raw_value) if isinstance(raw_value, str) else None
         if match:
-            orig_bbox = tuple(float(match.group(i)) for i in range(1, 5))
+            v0, v1, v2, v3 = (float(match.group(i)) for i in range(1, 5))
             orig_crs = QgsCoordinateReferenceSystem(match.group(5)) if match.group(5) \
                 else self.parameterAsExtentCrs(parameters, self.EXTENT, context)
         else:
             extent_native = self.parameterAsExtent(parameters, self.EXTENT, context)
-            orig_bbox = (extent_native.xMinimum(), extent_native.yMinimum(),
-                         extent_native.xMaximum(), extent_native.yMaximum())
+            v0, v1, v2, v3 = (extent_native.xMinimum(), extent_native.yMinimum(),
+                              extent_native.xMaximum(), extent_native.yMaximum())
             orig_crs = self.parameterAsExtentCrs(parameters, self.EXTENT, context)
+
+        def candidate_plausible(bbox):
+            x0, y0, x1, y1 = bbox
+            if x0 > x1 or y0 > y1:
+                return False
+            bbox_3035 = bbox if orig_crs.authid() == BEV_CRS \
+                else reproject_bbox_osr(bbox, orig_crs.authid(), BEV_CRS)
+            return looks_like_valid_3035_austria(bbox_3035) and bbox_area_km2(bbox_3035) <= ABORT_AREA_KM2
+
+        # WICHTIG #2: Weder beim rohen Extent-String noch bei
+        # parameterAsExtent()'s eigenen xMin/yMin/xMax/yMax-Zugriffen ist
+        # verlaesslich, dass die 4 Werte tatsaechlich in der Reihenfolge
+        # xmin,ymin,xmax,ymax vorliegen. Dokumentiert ist ein QGIS-Bug, bei
+        # dem parameterAsExtent() fuer EPSG:31255 die mittleren beiden Werte
+        # vertauscht zurueckgibt (siehe qgis_bugreport_parameterAsExtent.md);
+        # zusaetzlich beobachtet (QGIS 4.2.2/Linux, AOI in EPSG:25833) ein
+        # Fall, in dem bereits der ROHE STRING selbst in dieser vertauschten
+        # Reihenfolge vorlag. Beide Faelle betreffen dieselben zwei
+        # mittleren Positionen - deshalb werden hier immer beide moeglichen
+        # Deutungen geprueft und anhand der Oesterreich-Sanity-Pruefung plus
+        # Flaechen-Obergrenze entschieden, welche plausibel ist. Ohne diese
+        # Gegenpruefung fuehrt eine vertauschte Reihenfolge zu einer um
+        # Groessenordnungen zu grossen (kontinent- statt grundstuecksgrossen)
+        # AOI, massenhaften Katalog-Fehltreffern und letztlich zu
+        # Abstuerzen mangels Speicherplatz beim Schreiben der Ergebnisse.
+        named_candidates = [
+            ("xmin,ymin,xmax,ymax", (v0, v1, v2, v3)),
+            ("xmin,xmax,ymin,ymax", (v0, v2, v1, v3)),
+        ]
+        plausible = [(label, bbox) for label, bbox in named_candidates if candidate_plausible(bbox)]
+        if len(plausible) == 1:
+            label, orig_bbox = plausible[0]
+            if label != "xmin,ymin,xmax,ymax":
+                feedback.pushWarning(
+                    "Die Standard-Reihenfolge (xmin,ymin,xmax,ymax) der AOI-Koordinaten ergab keine "
+                    "plausible Flaeche in Oesterreich - stattdessen wurde die Reihenfolge "
+                    f"'{label}' verwendet (auf manchen QGIS-Versionen/CRS-Kombinationen weicht die "
+                    "tatsaechlich verwendete Reihenfolge vom Standard ab). Bitte die unten ausgegebene "
+                    "AOI-Groesse zur Kontrolle pruefen.")
+        else:
+            # Beide Deutungen plausibel (Normalfall, keine Mehrdeutigkeit)
+            # oder keine (wird vom Sanity-/Flaechen-Check weiter unten
+            # ohnehin abgefangen) - Standard-Reihenfolge verwenden.
+            orig_bbox = named_candidates[0][1]
+
         feedback.pushInfo(
             f"AOI in Original-CRS ({orig_crs.authid()}): xmin={orig_bbox[0]:.4f}, ymin={orig_bbox[1]:.4f}, "
             f"xmax={orig_bbox[2]:.4f}, ymax={orig_bbox[3]:.4f}")
@@ -990,6 +1050,14 @@ class BevOrthofotoBulkDownload(QgsProcessingAlgorithm):
         height_km = (aoi_bbox[3] - aoi_bbox[1]) / 1000
         area_km2 = width_km * height_km
         feedback.pushInfo(f"AOI-Größe: {width_km:.1f} × {height_km:.1f} km ({area_km2:.0f} km²).")
+        if area_km2 > ABORT_AREA_KM2:
+            feedback.reportError(
+                f"Abgebrochen: Das berechnete Gebiet ist mit {area_km2:.0f} km² unplausibel groß "
+                f"(größer als {ABORT_AREA_KM2:.0f} km² - mehr als die Fläche ganz Österreichs). Das "
+                "deutet auf eine falsch interpretierte AOI hin (z.B. vertauschte Koordinatenreihenfolge "
+                "im Extent-Parameter), nicht auf eine tatsächlich beabsichtigte Anfrage. Bitte die AOI "
+                "(Gebiet) erneut setzen, z.B. über 'Gebiet aus Layer' mit dem gewünschten Layer.")
+            return {}
         if area_km2 > WARN_AREA_KM2:
             feedback.pushWarning(
                 f"Achtung: Das gewählte Gebiet ist mit {area_km2:.0f} km² sehr groß. Bei 20cm Auflösung "
