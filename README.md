@@ -10,10 +10,10 @@ A QGIS Processing script that bulk-downloads orthophoto (aerial imagery) tiles f
 
 Given an area of interest anywhere in Austria, this tool:
 
-- Fetches **Orthofoto RGBI** (true colour + near-infrared, 20cm resolution) by default — this product isn't published on a fixed grid but in irregular flight "Operate", found via a full-text catalog search and a local overlap check against your area. RGB and infrared arrive as separate files; the infrared channel can be switched off, or combined with RGB into a single 4-band stack.
-- Optionally, under "Advanced Parameters", also fetches **Orthofoto RGB** (true colour only, 20cm) from BEV's fixed 50×50 km nationwide grid — no infrared, but a single consistent capture date per tile. Loaded as an additional, separate layer alongside RGBI, not instead of it. This can be used as a backup method for RGB orthophoto download.
+- Fetches **Orthofoto RGBI** (true color + near-infrared, 20cm resolution) by default — this product isn't published on a fixed grid but in irregular flight "Operate", found via a full-text catalog search and a local overlap check against your area. RGB and infrared arrive as separate files; the infrared channel can be switched off, or combined with RGB into a single 4-band stack.
+- Optionally, under "Advanced Parameters", also fetches **Orthofoto RGB** (true color only, 20cm) from BEV's fixed 50×50 km nationwide grid — no infrared, but a single consistent capture date per tile. Loaded as an additional, separate layer alongside RGBI, not instead of it. This can be used as a backup method for RGB orthophoto download.
 - Reads only the actual bytes it needs via HTTP range requests directly from BEV's Cloud-Optimized GeoTIFFs (`/vsicurl/`), instead of downloading the full file — relevant since a single tile or flight can be several GB. Falls back to downloading (and locally caching) the complete file only if the windowed read fails for some reason.
-- Warns before starting if the chosen area is very large, given how quickly data volume grows at 20cm resolution.
+- Warns before starting if the chosen area is very large, given how quickly data volume grows at 20cm resolution, and stops right away if it is implausibly large (over 200,000 km², more than all of Austria), since that points to a misread area rather than a real request.
 - Builds a lightweight VRT mosaic per product and adds it directly to your QGIS project — including the 4-band stack and an optional target-CRS reprojection, both of which are also delivered as a VRT rather than a materialized copy.
 - Optional pyramids (overviews) for faster display in QGIS.
 - Optional on-the-fly reprojection, under "Advanced Parameters", to a target CRS of your choice, via a standard CRS picker — can noticeably increase processing time, since this virtually reprojects rather than copying pixels.
@@ -27,7 +27,7 @@ This is a single-file **Processing script**, not a full plugin:
 2. In QGIS: **Processing → Toolbox → Scripts (gear icon) → Add Script to Toolbox…**, and select the file.
 3. It will appear under **Skripte/Scripts → LiberGIS → BEV Orthofoto Bulk-Download**.
 
-No extra Python packages required beyond what ships with QGIS (uses only the Python standard library plus the bundled GDAL/PyQGIS). Tested on QGIS 3.44 LTR (Windows).
+No extra Python packages required beyond what ships with QGIS (uses only the Python standard library plus the bundled GDAL/PyQGIS). Tested on QGIS 3.44 LTR (Windows) and QGIS 4.2 (Linux).
 
 ## Usage
 
